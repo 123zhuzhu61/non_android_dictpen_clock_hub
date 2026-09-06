@@ -1,6 +1,6 @@
 #!/bin/sh
 # 自动 OCR 扫描原图，把完整文字写入 store.txt
-# 依赖: tesseract  (opkg install tesseract-ocr tesseract-ocr-data-chi-sim tesseract-ocr-data-eng)
+# 依赖: tesseract + tesseract-data-eng (opkg) + chi_sim.traineddata (curl 从 GitHub 拉，源里无中文包)
 STORE=/sys_data/penweb/store.txt
 STATE=/sys_data/penweb/.ocr_done
 # 可监视的目录（空格分隔）；如需增加扫描落点，改这里即可
@@ -27,8 +27,10 @@ is_jpeg() {
 
 ocr_one() {
   # $1=图片路径  $2=累积文件；把该图 OCR 文本(去空白行)追加到累积文件
+  # 注意：该设备的 tesseract 把 tessdata 解析为当前目录("./")，必须从
+  # /opt/share/tessdata 目录下运行才能找到 chi_sim/eng，故用子shell cd 进去。
   out="/tmp/ocr_$$_$RANDOM"
-  tesseract "$1" "$out" -l chi_sim+eng --psm 6 >/dev/null 2>&1
+  ( [ -d /opt/share/tessdata ] && cd /opt/share/tessdata; tesseract "$1" "$out" -l chi_sim+eng --psm 6 >/dev/null 2>&1 )
   grep -v '^[[:space:]]*$' "$out.txt" 2>/dev/null >> "$2"
   rm -f "$out" "$out.txt"
 }

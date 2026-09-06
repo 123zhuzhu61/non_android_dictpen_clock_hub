@@ -359,47 +359,43 @@ python3 --version && jq --version && tesseract --version
 
 ---
 
-## 三、部署 penweb（只需 deploy.sh 一个文件）
+## 三、部署 penweb（上传 7 个文件 + 跑一次 deploy.sh）
 
-`deploy.sh` 是**完全自包含**的安装脚本：它内部已经内嵌了 `server.py`、`screen.py`、`start.sh`、`stop.sh`、`ingest.sh`，运行时会一次性把它们写到设备的 `/sys_data/penweb/`，并用 opkg 安装 `jq`、`python3`（中文训练数据走 `curl` 下载，避开设备自带 `wget` 不支持 TLS 的问题）。**所以电脑侧你只需要这一个 `deploy.sh`。**
+程序文件已从 `deploy.sh` 中分离出来，发布包里**不再有内嵌代码**。部署时需要把 6 个程序文件上传到设备的 `/sys_data/penweb/`（固定目录），`deploy.sh` 本身位置不限：
 
-> 发布包里其他的 `.sh` 文件（`start.sh`/`stop.sh`/`ingest.sh`）只是这些脚本的**源码副本**，方便你查看或改写后重新生成 `deploy.sh`，部署时并不需要它们。
+- **需要上传的 6 个程序文件**：`server.py`、`screen.py`、`start.sh`、`stop.sh`、`ingest.sh`、`ocr.sh` → 全部传到 `/sys_data/penweb/`
+- **另加 `deploy.sh`**（位置不限，习惯上也放在 `/sys_data/penweb/`）
+
+`deploy.sh` 现在是**纯部署器**：只负责装依赖（jq / python3 / tesseract / 中文语言包，中文训练数据走 `curl` 下载，避开设备自带 `wget` 不支持 TLS 的问题）、配置开机自启、校验程序文件齐全，**不再内嵌任何代码**。
 
 ### 方法 A（推荐）：WebADB Files 上传
 
-1. 在电脑上打开发布包里的 `deploy.sh`。
-2. WebADB 切到 **Files** 标签，把 `deploy.sh` **上传到设备的 `/sys_data/` 下任意位置**（不用先建 penweb 文件夹，脚本会自动创建）。
+1. WebADB 切到 **Shell**，先建目录（Files 标签建不了文件夹）：
+
+```sh
+mkdir -p /sys_data/penweb
+```
+
+2. 切到 **Files** 标签，进入 `/sys_data/penweb/`，把 **7 个文件全部上传**：`server.py`、`screen.py`、`start.sh`、`stop.sh`、`ingest.sh`、`ocr.sh`、`deploy.sh`。
 3. 切到 **Shell** 标签，执行：
 
 ```sh
-sh /sys_data/deploy.sh
+sh /sys_data/penweb/deploy.sh
 ```
 
-### 方法 B（备用）：Shell 里粘贴
+### 方法 B（备用）：分步粘贴
 
-1. 电脑记事本打开 `deploy.sh` → 全选复制。
-2. WebADB **Shell** 里先敲：
-
-```sh
-cat > /tmp/deploy.sh <<'EOF'
-```
-
-回车，然后粘贴全部内容，最后单独一行输入 `EOF` 回车。
-3. 执行：
-
-```sh
-sh /tmp/deploy.sh
-```
+文件较多不适合全部粘贴，优先用方法 A；实在需要粘贴时，逐个文件用 `cat > 文件名 <<'EOF'` … `EOF` 写入 `/sys_data/penweb/` 后，再执行 `deploy.sh`。
 
 ### 看到完成提示
 
-执行后会看到 `jq 已存在，跳过安装` 或 `正在安装 jq`，以及末尾的 `==== 部署完成 ====`。所有文件都在 `/sys_data/penweb/` 下了，并会自动配置**开机自启**。
+执行后会看到 `正在安装 jq` 或 `jq 已存在`，以及末尾的 `==== 部署完成 ====`。若提示缺少程序文件，说明还没传齐，补传后重跑即可。部署会自动配置**开机自启**。
 
 ---
 
 ## 四、启动 / 停止 / 访问
 
-### 启动
+### 启动(必须执行以下命令才可启动)
 
 ```sh
 sh /sys_data/penweb/start.sh
@@ -535,14 +531,21 @@ rm -f /data/pre_run.sh
 
 ## 七、二次开发 & 编译校验
 
-- 想改逻辑：直接改发布包里的源码副本（或 `deploy.sh` 内嵌段），然后**重新上传 `deploy.sh` 跑一次**即可生效（设备上的 `/sys_data/penweb/` 是部署副本，以电脑这份为准）。
-- **校验内嵌 Python 能否编译**（强烈建议每次改完跑一遍，避免设备上语法错误）：
+- 程序文件已独立（不再内嵌在 `deploy.sh` 里）：直接改发布包里的 `server.py` / `screen.py` / 各 `.sh`，然后把改动的文件重传到设备 `/sys_data/penweb/` 覆盖，重启服务即可：
+
+```sh
+sh /sys_data/penweb/stop.sh
+sh /sys_data/penweb/start.sh
+```
+
+- `deploy.sh` 只负责装依赖和开机自启，改程序逻辑后**不需要重跑**（除非要新装依赖）。
+- **校验 Python 能否编译**（强烈建议每次改完跑一遍，避免设备上语法错误）：
 
 ```sh
 python3 test/check_compile.py
 ```
 
-它会从 `deploy.sh` 抽出 `PENWEB_SERVER_EOF` 和 `PENWEB_SCREEN_EOF` 两段 Python 做 `py_compile` 校验。
+它会对发布包根目录的 `server.py` 和 `screen.py` 直接做 `py_compile` 校验。
 
 - 自定义扫描源：编辑 `ingest.sh` 里的 `REC`（例如改用生词本 `word_book/scanWordCollection.json`）。
 
@@ -552,15 +555,18 @@ python3 test/check_compile.py
 
 | 文件 | 说明 |
 |---|---|
-| `deploy.sh` | **唯一需要部署的文件**，自包含安装器（内嵌 server.py / screen.py / start.sh / stop.sh / ingest.sh） |
-| `start.sh` | 设备启停脚本源码副本（deploy 会写到 `/sys_data/penweb/start.sh`） |
-| `stop.sh` | 停止脚本源码副本 |
-| `ingest.sh` | 自动抓词脚本源码副本 |
-| `deploy.verygood.sh` | 早期较稳定的 `deploy.sh` 备份版，可作回退参考 |
+| `deploy.sh` | **部署器**（不内嵌代码）。装依赖（jq/python3/tesseract/中文语言包）、配置开机自启、校验程序文件齐全；位置不限 |
+| `server.py` | 网页后端源码，**需上传到设备** `/sys_data/penweb/` |
+| `screen.py` | 屏幕接管渲染器源码，**需上传到设备** |
+| `start.sh` | 启动脚本源码，**需上传到设备** |
+| `stop.sh` | 停止脚本源码，**需上传到设备** |
+| `ingest.sh` | 自动抓词脚本源码，**需上传到设备** |
+| `ocr.sh` | 自动 OCR 扫描原图脚本源码，**需上传到设备** |
+| `deploy.verygood.sh` | 旧的自包含版 `deploy.sh` 备份（仍内嵌全部代码），仅作历史回退参考，**不要用于新部署** |
 | `README.md` | 历史版本文档（功能描述偏旧，以本说明为准） |
-| `test/check_compile.py` | 内嵌 Python 编译校验工具 |
+| `test/check_compile.py` | Python 编译校验工具（直接校验 `server.py` / `screen.py`） |
 
-> 部署时**只需 `deploy.sh`**；其余文件供查看、改写和回退使用。
+> 部署时需上传 **6 个程序文件 + deploy.sh** 到 `/sys_data/penweb/`；改哪个文件重传哪个即可，不用重跑 deploy.sh。
 
 ---
 
@@ -575,8 +581,9 @@ touch /opt/_test && rm /opt/_test && echo "OK: /opt 可写"   # 必须输出 OK 
 wget -O - http://bin.entware.net/armv7sf-k3.2/installer/generic.sh | sh
 export PATH=/opt/bin:/opt/sbin:$PATH
 opkg update
-# 3) 上传 deploy.sh 到 /sys_data/，然后：
-sh /sys_data/deploy.sh
+# 3) 建目录，Files 上传 7 个文件（server.py / screen.py / start.sh / stop.sh / ingest.sh / ocr.sh / deploy.sh），然后：
+mkdir -p /sys_data/penweb
+sh /sys_data/penweb/deploy.sh
 # 4) 启动 + 浏览器访问：
 sh /sys_data/penweb/start.sh
 #    打开 http://<IP>:8080/
@@ -591,7 +598,7 @@ sh /sys_data/penweb/start.sh
 # 文件说明（每个文件的作用）
 
 > 配套 `安装与使用说明.md` 使用。本文把"发布包里的文件"和"部署后词典笔上生成的文件"分开说明，方便你对照。
-> 部署动作只有一条：`sh /sys_data/deploy.sh`，它会把下面"设备端生成文件"全部自动写到 `/sys_data/penweb/`，你无需手动建。
+> 部署动作：把发布包里 6 个程序文件 + `deploy.sh` 上传到设备 `/sys_data/penweb/`，然后执行 `sh /sys_data/penweb/deploy.sh`（装依赖 + 配置开机自启 + 校验文件齐全）。
 
 ---
 
@@ -599,19 +606,24 @@ sh /sys_data/penweb/start.sh
 
 | 文件 | 作用 |
 |---|---|
-| `deploy.sh` | **唯一的部署入口**。完全自包含：内部以 heredoc 内嵌了 `server.py`、`screen.py`、`start.sh`、`stop.sh`、`ingest.sh`，运行时一次性写到设备 `/sys_data/penweb/`，并用 opkg 安装 `jq`/`python3`。**部署只要它一个。** |
-| `start.sh` | 设备启动脚本的**源码副本**。内容：`pkill` 掉旧进程 → `python3 server.py &` 拉起网页服务 → `sh ingest.sh &` 拉起自动抓词 → 打印访问地址。部署后实际运行的是设备上的 `/sys_data/penweb/start.sh`。 |
-| `stop.sh` | 停止脚本的**源码副本**。`pkill` 掉 `server.py`/`ingest.sh`。 |
-| `ingest.sh` | 自动抓词脚本的**源码副本**。监听词典笔扫描记录 `scanWordRecord.json`，按时间**增量**提取新词去重写入 `store.txt`。 |
-| `deploy.verygood.sh` | 早期较稳定的 `deploy.sh` 备份版。逻辑偏旧（含已删除的图片投送/正计时），**仅作回退参考**，不要用于新部署。 |
+| `deploy.sh` | **部署器**（不内嵌代码）。装依赖（jq/python3/tesseract/中英文语言包）、配置开机自启、校验程序文件齐全。 |
+| `server.py` | **网页后端源码**（基于 `http.server`）。提供主页、各功能页（轮换/倒计时/消息/天气等）、接收手机/网页下发的计时与消息、驱动自动抓词的结果汇总、提供导出 `.txt`、管理屏幕显示状态（`overlay.json`/`timer_state.json`）。上传后直接在设备上运行。 |
+| `screen.py` | **屏幕接管渲染器源码**。直接写 framebuffer（`FBIOPAN_DISPLAY`），按当前模式绘制天气/时钟/轮换/倒计时/消息；常驻主循环与触摸监听（点屏关闹钟/倒计时、轮换中点屏看一眼倒计时）。 |
+| `start.sh` | **启动脚本源码**。内容：`pkill` 掉旧进程 → `python3 server.py &` 拉起网页服务 → `sh ingest.sh &` 拉起自动抓词 → 防深度睡眠处理 → 打印访问地址。 |
+| `stop.sh` | **停止脚本源码**。`pkill` 掉 `server.py`/`ingest.sh`/`ocr.sh`/`screen.py`，解除防睡眠绑定。 |
+| `ingest.sh` | **自动抓词脚本源码**。监听词典笔扫描记录 `scanWordRecord.json`，按时间**增量**提取新词去重写入 `store.txt`。 |
+| `ocr.sh` | **自动 OCR 脚本源码**。监听扫描原图目录，用 tesseract 识别完整文字，以 `[OCR]` 标记写入 `store.txt`（绕开屏幕显示被截断的限制）。 |
+| `deploy.verygood.sh` | 旧的自包含版 `deploy.sh` 备份（仍内嵌全部代码），**仅作回退参考**，不要用于新部署。 |
 | `README.md` | 历史版本文档，功能描述偏旧（仍含图片投送/正计时）。以本发布包的 `安装与使用说明.md` 和 `文件说明.md` 为准。 |
-| `test/check_compile.py` | 编译校验工具。从 `deploy.sh` 抽出 `PENWEB_SERVER_EOF` 和 `PENWEB_SCREEN_EOF` 两段 Python 做 `py_compile`，改完 `deploy.sh` 后跑一遍可提前发现语法错误。用法：`python3 test/check_compile.py` |
+| `test/check_compile.py` | 编译校验工具。对发布包根目录的 `server.py` / `screen.py` 直接做 `py_compile`，改完源码跑一遍可提前发现语法错误。用法：`python3 test/check_compile.py` |
+
+> 上述前 7 个文件（6 个程序文件 + deploy.sh）都是**需要上传到设备的**；其余文件供查看、校验和回退使用。
 
 ---
 
 ## 二、设备端生成文件（部署后在 `/sys_data/penweb/` 下）
 
-这些由 `deploy.sh` 自动生成，是真正在词典笔上运行的程序与数据。
+这些是部署时上传的程序文件（与发布包根目录同名文件一致）加上运行时生成的数据。
 
 ### 2.1 程序
 
@@ -619,9 +631,9 @@ sh /sys_data/penweb/start.sh
 |---|---|
 | `server.py` | **网页后端**（基于 `http.server`）。提供主页、各功能页（轮换/倒计时/消息/天气等）、接收手机/网页下发的计时与消息、驱动自动抓词的结果汇总、提供导出 `.txt`、管理屏幕显示状态（`overlay.json`/`timer_state.json`）。 |
 | `screen.py` | **屏幕接管渲染器**。直接写 framebuffer（`FBIOPAN_DISPLAY`），按当前模式绘制天气/时钟/轮换/倒计时/消息；常驻主循环与触摸监听（点屏关闹钟/倒计时、轮换中点屏看一眼倒计时）。 |
-| `start.sh` / `stop.sh` / `ingest.sh` | 见上方"源码副本"说明，部署后这里是**真正被执行的版本**。 |
+| `start.sh` / `stop.sh` / `ingest.sh` / `ocr.sh` | 设备启停 / 抓词 / OCR 脚本。 |
 
-### 2.2 数据 / 状态文件
+### 2.2 数据 / 状态文件（运行时生成）
 
 | 文件 | 作用 |
 |---|---|
@@ -654,16 +666,17 @@ sh /sys_data/penweb/start.sh
 
 ## 三、一句话记忆
 
-- **要部署／要带走**：只带 `deploy.sh`（`penweb_release/` 整包更稳妥）。
-- **要改逻辑**：改 `deploy.sh` 内嵌段或对应源码副本 → 重传 `deploy.sh` 重跑。
+- **要部署／要带走**：带上整个发布包（至少 6 个程序文件 + `deploy.sh`）。
+- **部署动作**：全部传到 `/sys_data/penweb/` → 跑一次 `deploy.sh`（装依赖 + 自启）。
+- **要改逻辑**：改哪个文件重传哪个 → `stop.sh` + `start.sh` 重启服务，不用重跑 deploy.sh。
 - **改完先校验**：`python3 test/check_compile.py`。
-- **设备上跑的**：`server.py` + `screen.py` + 三个 `.sh`；数据在 `store.txt`／`overlay.json`／`timer_state.json`；配置是那一堆 `.conf`。
+- **设备上跑的**：`server.py` + `screen.py` + 四个 `.sh`；数据在 `store.txt`／`overlay.json`／`timer_state.json`；配置是那一堆 `.conf`。
 
 ---
 
 ## 三、补充：关于 `ocr.sh`
 
-本目录下存在 `ocr.sh`，但上述两份文档的文件清单中未列出它，这里补充说明：
+`ocr.sh` 是发布包里的正式源码文件之一，与其他程序文件一同上传到 `/sys_data/penweb/`：
 
 - **作用**：监听 `/sys_data/fatfs/answer_word/answerImgs/<毫秒时间戳>/` 下的新目录，对该目录内的标准 JPEG 跑 `tesseract`（`chi_sim+eng`），把识别出的完整文字以 `[OCR]` 标记写入 `store.txt`。
 - **目的**：设备主程序用 LVGL 的 `lv_textarea_set_max_length` 截断屏幕显示的长文，但扫描**原图是完整保存**的。通过 OCR 原图，可在**不修改固件**的前提下拿到完整全文。
@@ -671,7 +684,7 @@ sh /sys_data/penweb/start.sh
 - **更详细的原理与排错**，参见上级目录 `penweb/README.md`（历史文档中 OCR 部分仍有效）。
 - **部署**：`deploy.sh` 的依赖安装流程中包含 `tesseract` 及中英文语言包；语言包走 `curl` 下载，以避开设备自带 `wget` 不支持 TLS 的问题。
 
-> OCR 识别结果可能包含受著作权保护或涉及隐私的内容，其采集与使用由操作者自行负责，详见文首免责声明第 5 条。
+> OCR 识别结果可能包含受著作权保护或涉及隐私的内容，其采集与使用由操作者自行负责，详见文首免责声明第 5 条。该功能尚在测试阶段，如有Bug请见谅。
 
 ---
 

@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
-# 从 deploy.sh 提取两段 heredoc 的 Python 内容并 py_compile 校验。
-import re, sys, py_compile, tempfile, os, traceback
-src = open(r"E:\WorkBuddy\词典笔\penweb\deploy.sh", encoding="utf-8").read()
-parts = re.findall(r"<<'([A-Z_]+)'\n(.*?)\n[A-Z_]+\n", src, flags=re.DOTALL)
+# 对发布包里的 server.py / screen.py 直接做 py_compile 校验。
+# （旧版从 deploy.sh 的 heredoc 抽取内嵌段校验；内嵌方式已废弃，程序文件已独立。）
+import os, sys, py_compile, tempfile, traceback
+
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TARGETS = ["server.py", "screen.py"]
+
 ok = True
-for tag, body in parts:
-    if tag not in ("PENWEB_SERVER_EOF", "PENWEB_SCREEN_EOF"):
+for name in TARGETS:
+    p = os.path.join(BASE, name)
+    if not os.path.isfile(p):
+        ok = False
+        print("[FAIL] %s: 文件不存在（应在发布包根目录）" % name)
         continue
-    fd, p = tempfile.mkstemp(suffix=".py", prefix=tag+"_")
+    fd, tmp = tempfile.mkstemp(suffix=".pyc", prefix=name + "_")
     os.close(fd)
-    open(p, "w", encoding="utf-8").write(body)
     try:
-        py_compile.compile(p, doraise=True)
-        print("[OK] %s: %d bytes" % (tag, len(body)))
+        py_compile.compile(p, doraise=True, cfile=tmp)
+        print("[OK] %s: %d bytes" % (name, os.path.getsize(p)))
     except py_compile.PyCompileError as e:
         ok = False
-        print("[FAIL] %s: %s" % (tag, e))
+        print("[FAIL] %s: %s" % (name, e))
         traceback.print_exc()
     finally:
-        os.unlink(p)
+        try: os.unlink(tmp)
+        except OSError: pass
+
 sys.exit(0 if ok else 1)
