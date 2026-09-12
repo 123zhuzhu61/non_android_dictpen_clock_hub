@@ -448,9 +448,6 @@ umount /opt 2>/dev/null
 # 3. 删除部署目录与全部第三方包（Entware、python3、jq、tesseract 一并清除）
 rm -rf /sys_data/penweb
 rm -rf /sys_data/opt
-
-# 4. 删除开机自启脚本
-rm -f /data/pre_run.sh
 ```
 
 > ⚠️ 第 4 步执行前先 `cat /data/pre_run.sh` 看一眼内容：本机型实测该文件由 `deploy.sh`
